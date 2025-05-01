@@ -1,0 +1,8 @@
+<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .landmark { fill: #0D9488; }
+    .coin { fill: #FACC15; }
+  </style>
+  <path class="landmark" d="M1 22h22v2H1v-2zm5.43-14.73c-.56-.42-1.39-.91-2.67-1.29-.87-.26-1.75-.3-2.76.22V21h7V8.37c-1.14-.46-1.43-.7-1.57-.82zM20 6c-1.9 0-3.7.84-5 2.25V21h10V8.25C23.7 6.84 21.9 6 20 6zm-2 14c0-1.1.9-2 2-2s2 .9 2 2h-4zM3 21c0-1.1.9-2 2-2s2 .9 2 2H3zm7-6h4v2h-4v-2zm0-3h4v2h-4v-2z"/>
+  <circle class="coin" cx="19" cy="19" r="3"/>
+</svg>
