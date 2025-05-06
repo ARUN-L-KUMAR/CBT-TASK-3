@@ -6,7 +6,6 @@ CommunityCoin is a decentralized application (dApp) that reimagines community pr
 
 CommunityCoin allows community leaders to create funding proposals for local initiatives, while donors can contribute with full confidence that their funds will be used as intended. Every transaction is recorded on the blockchain, creating an immutable record that anyone can verify.
 
-## Features
 
 - **Transparent Funding**: All donations and withdrawals are recorded on the blockchain
 - **Project Creation**: Community leaders can create detailed project proposals
