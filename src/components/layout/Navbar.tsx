@@ -44,16 +44,19 @@ const Navbar: React.FC = () => {
     { name: 'About', path: '/about', icon: null },
   ];
 
-  const navbarClasses = `fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-    scrolled ? 'bg-white shadow-md py-2' : 'bg-transparent py-4'
+  const navbarClasses = `fixed top-0 left-0 right-0 z-50 transition-all duration-300 backdrop-blur-sm ${
+    scrolled ? 'bg-white/95 shadow-md py-2' : 'bg-transparent py-4'
   }`;
 
   return (
     <header className={navbarClasses}>
       <div className="container-pad flex justify-between items-center">
-        <Link to="/" className="flex items-center">
-          <Logo className="h-10 w-10" />
-          <span className="ml-2 text-xl font-heading font-bold text-primary-700">
+        <Link to="/" className="flex items-center group">
+          <div className="relative overflow-hidden">
+            <Logo className="h-10 w-10 transform group-hover:scale-110 transition-transform duration-300" />
+            <div className="absolute inset-0 bg-primary-500 rounded-full opacity-0 group-hover:opacity-10 transition-opacity duration-300"></div>
+          </div>
+          <span className="ml-2 text-xl font-heading font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-primary-800">
             CommunityCoin
           </span>
         </Link>
@@ -74,15 +77,17 @@ const Navbar: React.FC = () => {
               <span>{link.name}</span>
             </Link>
           ))}
-          
+
           <button
             onClick={connectWallet}
             disabled={isLoading || isConnected}
-            className={`btn ${
-              isConnected ? 'bg-green-100 text-green-800 hover:bg-green-100 cursor-default' : 'btn-primary'
+            className={`relative overflow-hidden transition-all duration-300 ${
+              isConnected
+                ? 'bg-gradient-to-r from-green-50 to-green-100 text-green-800 hover:shadow-md border border-green-200 px-4 py-2 rounded-lg'
+                : 'btn-primary shadow-md hover:shadow-lg hover:-translate-y-0.5 transform'
             } flex items-center space-x-2`}
           >
-            <Wallet className="h-4 w-4" />
+            <Wallet className={`h-4 w-4 ${isConnected ? 'text-green-600' : ''}`} />
             <span>
               {isLoading
                 ? 'Connecting...'
@@ -90,13 +95,22 @@ const Navbar: React.FC = () => {
                 ? shortenAddress(account)
                 : 'Connect Wallet'}
             </span>
+            {!isConnected && (
+              <motion.div
+                className="absolute inset-0 bg-white"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 0.1 }}
+                transition={{ duration: 1.5, repeat: Infinity, repeatType: "reverse" }}
+              />
+            )}
           </button>
         </nav>
 
         {/* Mobile Menu Button */}
         <div className="md:hidden flex items-center">
           {isConnected && (
-            <div className="mr-4 text-xs font-medium py-1 px-2 bg-green-100 text-green-800 rounded-lg">
+            <div className="mr-4 text-xs font-medium py-1.5 px-3 bg-gradient-to-r from-green-50 to-green-100 text-green-800 rounded-full border border-green-200 shadow-sm flex items-center">
+              <div className="w-2 h-2 rounded-full bg-green-500 mr-1.5"></div>
               {shortenAddress(account)}
             </div>
           )}
@@ -136,15 +150,21 @@ const Navbar: React.FC = () => {
                   <span>{link.name}</span>
                 </Link>
               ))}
-              
+
               {!isConnected && (
                 <button
                   onClick={connectWallet}
                   disabled={isLoading}
-                  className="btn btn-primary w-full flex items-center justify-center space-x-2"
+                  className="relative overflow-hidden btn btn-primary w-full flex items-center justify-center space-x-2 shadow-md"
                 >
                   <Wallet className="h-4 w-4" />
                   <span>{isLoading ? 'Connecting...' : 'Connect Wallet'}</span>
+                  <motion.div
+                    className="absolute inset-0 bg-white"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 0.1 }}
+                    transition={{ duration: 1.5, repeat: Infinity, repeatType: "reverse" }}
+                  />
                 </button>
               )}
             </div>

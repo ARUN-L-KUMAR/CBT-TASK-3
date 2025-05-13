@@ -2,15 +2,14 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/Counters.sol";
 
 /**
  * @title CommunityFunding
  * @dev A contract for transparent community project funding
  */
 contract CommunityFunding is Ownable {
-    using Counters for Counters.Counter;
-    Counters.Counter private _projectIds;
+    // Project ID counter
+    uint256 private _nextProjectId = 1;
 
     // Define project struct
     struct Project {
@@ -38,13 +37,13 @@ contract CommunityFunding is Ownable {
         uint256 goal,
         uint256 deadline
     );
-    
+
     event DonationReceived(
         uint256 indexed projectId,
         address indexed donor,
         uint256 amount
     );
-    
+
     event FundsWithdrawn(
         uint256 indexed projectId,
         address indexed creator,
@@ -78,9 +77,9 @@ contract CommunityFunding is Ownable {
         require(bytes(_title).length > 0, "Title cannot be empty");
         require(bytes(_description).length > 0, "Description cannot be empty");
 
-        _projectIds.increment();
-        uint256 newProjectId = _projectIds.current();
-        
+        uint256 newProjectId = _nextProjectId;
+        _nextProjectId++;
+
         projects[newProjectId] = Project({
             id: newProjectId,
             title: _title,
@@ -94,9 +93,9 @@ contract CommunityFunding is Ownable {
             location: _location,
             imageUrl: _imageUrl
         });
-        
+
         emit ProjectCreated(newProjectId, msg.sender, _title, _goal, _deadline);
-        
+
         return newProjectId;
     }
 
@@ -106,13 +105,13 @@ contract CommunityFunding is Ownable {
      */
     function donateToProject(uint256 _projectId) public payable {
         Project storage project = projects[_projectId];
-        
+
         require(project.id == _projectId, "Project does not exist");
         require(block.timestamp <= project.deadline, "Project funding has ended");
         require(msg.value > 0, "Donation amount must be greater than zero");
-        
+
         project.currentAmount += msg.value;
-        
+
         emit DonationReceived(_projectId, msg.sender, msg.value);
     }
 
@@ -122,24 +121,34 @@ contract CommunityFunding is Ownable {
      */
     function withdrawFunds(uint256 _projectId) public {
         Project storage project = projects[_projectId];
-        
+
         require(project.id == _projectId, "Project does not exist");
         require(msg.sender == project.creator, "Only the project creator can withdraw funds");
         require(project.currentAmount > 0, "No funds available to withdraw");
-        
+
         uint256 amount = project.currentAmount;
         project.currentAmount = 0;
-        
+
         (bool success, ) = project.creator.call{value: amount}("");
         require(success, "Transfer failed");
-        
+
         emit FundsWithdrawn(_projectId, msg.sender, amount);
     }
 
     /**
      * @dev Get project details
      * @param _projectId The ID of the project
-     * @return Project details
+     * @return id Project ID
+     * @return title Project title
+     * @return description Project description
+     * @return category Project category
+     * @return goal Project funding goal
+     * @return currentAmount Current amount of funds raised
+     * @return creator Address of project creator
+     * @return deadline Project funding deadline
+     * @return createdAt Project creation timestamp
+     * @return location Project location
+     * @return imageUrl Project image URL
      */
     function getProject(uint256 _projectId) public view returns (
         uint256 id,
@@ -156,7 +165,7 @@ contract CommunityFunding is Ownable {
     ) {
         Project memory project = projects[_projectId];
         require(project.id == _projectId, "Project does not exist");
-        
+
         return (
             project.id,
             project.title,
@@ -177,6 +186,6 @@ contract CommunityFunding is Ownable {
      * @return Total number of projects
      */
     function getProjectCount() public view returns (uint256) {
-        return _projectIds.current();
+        return _nextProjectId - 1;
     }
 }

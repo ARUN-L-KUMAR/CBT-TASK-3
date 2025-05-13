@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Heart, Calendar, User, Share2, Info } from 'lucide-react';
-import { mockProjects } from '../data/mockProjects';
-import { Project } from '../types/project';
+import { Heart, Calendar, User, Share2, Info, Loader } from 'lucide-react';
+import { Project, Transaction } from '../types/project';
+import { useWeb3 } from '../context/Web3Context';
+import { ethers } from 'ethers';
 
 // Components
 import ProjectDetailHeader from '../components/project/ProjectDetailHeader';
@@ -13,19 +14,73 @@ import TransactionHistory from '../components/project/TransactionHistory';
 
 const ProjectDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const { fundingContract } = useWeb3();
   const [project, setProject] = useState<Project | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  
-  // Get project data
+
+  // Get project data from blockchain
   useEffect(() => {
-    // Simulate API call with mock data
-    setTimeout(() => {
-      const foundProject = mockProjects.find(p => p.id === id);
-      setProject(foundProject || null);
+    const fetchProject = async () => {
+      if (fundingContract && id) {
+        try {
+          // Get project data
+          const projectData = await fundingContract.projects(id);
+
+          if (projectData && projectData.id.toString() !== '0') {
+            // Convert project data to our Project type
+            const fetchedProject: Project = {
+              id: projectData.id.toString(),
+              title: projectData.title,
+              description: projectData.description,
+              category: projectData.category,
+              goal: parseFloat(ethers.formatEther(projectData.goal)),
+              currentAmount: parseFloat(ethers.formatEther(projectData.currentAmount)),
+              creator: projectData.creator,
+              deadline: Number(projectData.deadline),
+              createdAt: Number(projectData.createdAt),
+              image: projectData.imageUrl,
+              location: projectData.location,
+              transactions: [] // We'll fetch these separately
+            };
+
+            // Get donation events for this project
+            try {
+              const filter = fundingContract.filters.DonationReceived(id);
+              const events = await fundingContract.queryFilter(filter);
+
+              // Convert events to transactions
+              const transactions: Transaction[] = events.map((event, index) => {
+                const { donor, amount } = event.args;
+                return {
+                  id: `tx-${index}`,
+                  type: 'donation',
+                  from: donor,
+                  amount: parseFloat(ethers.formatEther(amount)),
+                  timestamp: Math.floor(Date.now() / 1000), // We don't have the exact timestamp from events
+                  transactionHash: event.transactionHash,
+                };
+              });
+
+              fetchedProject.transactions = transactions;
+            } catch (error) {
+              console.error("Error fetching project transactions:", error);
+            }
+
+            setProject(fetchedProject);
+          } else {
+            setProject(null);
+          }
+        } catch (error) {
+          console.error("Error fetching project:", error);
+          setProject(null);
+        }
+      }
       setIsLoading(false);
-    }, 500);
-  }, [id]);
-  
+    };
+
+    fetchProject();
+  }, [fundingContract, id]);
+
   // Handle successful donation
   const handleDonationSuccess = (amount: string) => {
     if (project) {
@@ -36,18 +91,18 @@ const ProjectDetailPage: React.FC = () => {
       });
     }
   };
-  
+
   if (isLoading) {
     return (
       <div className="pt-16 min-h-screen flex items-center justify-center">
-        <div className="animate-pulse flex flex-col items-center">
-          <div className="h-10 w-40 bg-gray-200 rounded mb-4"></div>
-          <div className="h-6 w-60 bg-gray-200 rounded"></div>
+        <div className="flex flex-col items-center">
+          <Loader className="h-12 w-12 text-primary-600 animate-spin mb-4" />
+          <p className="text-gray-600">Loading project details...</p>
         </div>
       </div>
     );
   }
-  
+
   if (!project) {
     return (
       <div className="pt-16 container mx-auto px-4 py-12 text-center">
@@ -65,37 +120,37 @@ const ProjectDetailPage: React.FC = () => {
       </div>
     );
   }
-  
+
   // Calculate deadline info
   const deadlineDate = new Date(project.deadline * 1000);
   const now = new Date();
   const isExpired = deadlineDate < now;
-  
+
   // Format deadline date
   const formattedDate = new Intl.DateTimeFormat('en-US', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
   }).format(deadlineDate);
-  
+
   return (
     <div className="pt-16">
       <ProjectDetailHeader project={project} />
-      
+
       <div className="container-pad py-8">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Main Content */}
           <div className="lg:col-span-2">
             <div className="card mb-8">
               <div className="p-6">
-                <FundingProgressBar 
-                  currentAmount={project.currentAmount} 
-                  goal={project.goal} 
-                  large 
+                <FundingProgressBar
+                  currentAmount={project.currentAmount}
+                  goal={project.goal}
+                  large
                 />
               </div>
             </div>
-            
+
             <div className="card mb-8">
               <div className="p-6">
                 <h2 className="text-xl font-heading font-semibold mb-4">About This Project</h2>
@@ -104,21 +159,21 @@ const ProjectDetailPage: React.FC = () => {
                 </div>
               </div>
             </div>
-            
+
             <TransactionHistory transactions={project.transactions || []} />
           </div>
-          
+
           {/* Sidebar */}
           <div className="lg:col-span-1">
             <div className="sticky top-28">
-              <DonationForm 
+              <DonationForm
                 project={project}
                 onDonationSuccess={handleDonationSuccess}
               />
-              
+
               <div className="card p-6 mt-6">
                 <h3 className="text-lg font-heading font-semibold mb-3">Project Details</h3>
-                
+
                 <div className="space-y-4">
                   <div className="flex items-start">
                     <Calendar className="h-5 w-5 text-gray-500 mt-0.5 mr-3" />
@@ -129,7 +184,7 @@ const ProjectDetailPage: React.FC = () => {
                       </p>
                     </div>
                   </div>
-                  
+
                   <div className="flex items-start">
                     <User className="h-5 w-5 text-gray-500 mt-0.5 mr-3" />
                     <div>
@@ -139,7 +194,7 @@ const ProjectDetailPage: React.FC = () => {
                       </p>
                     </div>
                   </div>
-                  
+
                   {project.location && (
                     <div className="flex items-start">
                       <Calendar className="h-5 w-5 text-gray-500 mt-0.5 mr-3" />
@@ -149,7 +204,7 @@ const ProjectDetailPage: React.FC = () => {
                       </div>
                     </div>
                   )}
-                  
+
                   <div className="flex items-start">
                     <Heart className="h-5 w-5 text-gray-500 mt-0.5 mr-3" />
                     <div>
@@ -160,9 +215,9 @@ const ProjectDetailPage: React.FC = () => {
                     </div>
                   </div>
                 </div>
-                
+
                 <div className="mt-6 pt-4 border-t">
-                  <button 
+                  <button
                     className="flex items-center justify-center w-full text-primary-600 hover:text-primary-700"
                     aria-label="Share project"
                   >

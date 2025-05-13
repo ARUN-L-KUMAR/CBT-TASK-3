@@ -42,12 +42,21 @@ CommunityCoin allows community leaders to create funding proposals for local ini
    npm install
    ```
 
-3. Start the development server
+3. Configure environment variables
+   - The project is already configured with the `.env` file containing:
+     - Ethereum wallet private key
+     - Sepolia testnet RPC URL
+     - Etherscan API key
+     - Contract address
+     - Pinata API credentials
+   - The frontend uses `.env.local` with the Vite-compatible environment variables
+
+4. Start the development server
    ```
    npm run dev
    ```
 
-4. Open your browser and navigate to `http://localhost:5173`
+5. Open your browser and navigate to `http://localhost:5173`
 
 ### Smart Contract Deployment
 
@@ -60,6 +69,37 @@ CommunityCoin allows community leaders to create funding proposals for local ini
    ```
    npm run deploy:local
    ```
+
+3. Deploy to Sepolia testnet
+   ```
+   npm run deploy:sepolia
+   ```
+
+## IPFS Integration with Pinata
+
+The project is configured to use Pinata for IPFS storage. The following utilities are available in `src/utils/pinata.ts`:
+
+- `uploadFileToPinata(file, name)`: Upload a file to IPFS
+- `uploadJSONToPinata(jsonData, name)`: Upload JSON data to IPFS
+- `getIPFSGatewayURL(ipfsHash)`: Get the gateway URL for an IPFS hash
+
+Example usage:
+
+```typescript
+import { uploadFileToPinata, getIPFSGatewayURL } from '../utils/pinata';
+
+// Upload a file to IPFS
+const handleFileUpload = async (file) => {
+  try {
+    const ipfsHash = await uploadFileToPinata(file, 'project-image');
+    const imageUrl = getIPFSGatewayURL(ipfsHash);
+    console.log('File uploaded to IPFS:', ipfsHash);
+    console.log('Access URL:', imageUrl);
+  } catch (error) {
+    console.error('Error uploading to IPFS:', error);
+  }
+};
+```
 
 ## Testing
 

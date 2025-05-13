@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useWeb3 } from '../../context/Web3Context';
 import { ethers } from 'ethers';
@@ -7,8 +7,8 @@ import { motion } from 'framer-motion';
 
 const CreateProjectForm: React.FC = () => {
   const navigate = useNavigate();
-  const { isConnected, fundingContract, provider } = useWeb3();
-  
+  const { isConnected, fundingContract, provider, userRole, setUserRole } = useWeb3();
+
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -18,13 +18,28 @@ const CreateProjectForm: React.FC = () => {
     location: '',
     image: 'https://images.pexels.com/photos/7708816/pexels-photo-7708816.jpeg', // Default image
   });
-  
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
-  
+  const [roleSelected, setRoleSelected] = useState(false);
+
   // Form validation
   const [errors, setErrors] = useState<Record<string, string>>({});
-  
+
+  useEffect(() => {
+    // Reset form and errors when user role changes
+    setFormData({
+      title: '',
+      description: '',
+      category: 'environment',
+      goal: '0.1',
+      deadline: '',
+      location: '',
+      image: 'https://images.pexels.com/photos/7708816/pexels-photo-7708816.jpeg',
+    });
+    setErrors({});
+  }, [userRole]);
+
   const categories = [
     { id: 'environment', name: 'Environment' },
     { id: 'community', name: 'Community' },
@@ -33,11 +48,16 @@ const CreateProjectForm: React.FC = () => {
     { id: 'health', name: 'Health' },
     { id: 'arts', name: 'Arts & Culture' },
   ];
-  
+
+  const handleRoleSelection = (role: 'guest' | 'registered') => {
+    setUserRole(role);
+    setRoleSelected(true);
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
-    
+
     // Clear error for this field
     if (errors[name]) {
       setErrors((prev) => {
@@ -47,84 +67,121 @@ const CreateProjectForm: React.FC = () => {
       });
     }
   };
-  
+
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
-    
+
     if (!formData.title.trim()) newErrors.title = 'Title is required';
     if (!formData.description.trim()) newErrors.description = 'Description is required';
     if (!formData.goal || parseFloat(formData.goal) <= 0) newErrors.goal = 'Goal must be greater than 0';
     if (!formData.deadline) newErrors.deadline = 'Deadline is required';
-    
+
     // Check if deadline is in the future
     const deadlineDate = new Date(formData.deadline).getTime();
     const now = Date.now();
     if (deadlineDate <= now) newErrors.deadline = 'Deadline must be in the future';
-    
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
-  
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!isConnected) {
       setError('Please connect your wallet first');
       return;
     }
-    
+
     if (!fundingContract || !provider) {
       setError('Contract not initialized');
       return;
     }
-    
+
+    if (userRole !== 'registered') {
+      setError('Only registered users can create projects');
+      return;
+    }
+
     // Validate form
     if (!validateForm()) return;
-    
+
     setIsSubmitting(true);
     setError('');
-    
+
     try {
       // Get signer for transaction
       const signer = await provider.getSigner();
-      const contractWithSigner = fundingContract.connect(signer);
-      
-      // Convert deadline to Unix timestamp
+
+      // Verify we're on Sepolia network
+      const network = await provider.getNetwork();
+      if (Number(network.chainId) !== 11155111) { // Sepolia chainId
+        setError('Please switch to Sepolia network to create a project');
+        return;
+      }
+
+      // Convert deadline to Unix timestamp (seconds)
       const deadlineTimestamp = Math.floor(new Date(formData.deadline).getTime() / 1000);
-      
+
       // Convert goal to wei
       const goalWei = ethers.parseEther(formData.goal);
-      
-      // Call the contract
-      const tx = await contractWithSigner.createProject(
-        formData.title,
-        formData.description,
-        formData.category,
+
+      // Clean up strings
+      const title = formData.title.trim();
+      const description = formData.description.trim();
+      const category = formData.category.trim();
+      const location = formData.location ? formData.location.trim() : '';
+      const imageUrl = formData.image ? formData.image.trim() : '';
+
+      // Additional validations
+      if (title.length === 0) throw new Error('Title cannot be empty');
+      if (description.length === 0) throw new Error('Description cannot be empty');
+      if (goalWei <= 0n) throw new Error('Goal must be greater than zero');
+
+      // Current block timestamp for deadline validation
+      const block = await provider.getBlock('latest');
+      if (!block) throw new Error('Could not get latest block');
+      if (deadlineTimestamp <= block.timestamp) throw new Error('Deadline must be in the future');
+
+      // Create project transaction
+      const tx = await fundingContract.createProject(
+        title,
+        description,
+        category,
         goalWei,
         deadlineTimestamp,
-        formData.location,
-        formData.image
+        location,
+        imageUrl,
+        { gasLimit: 1000000 }
       );
-      
-      // Wait for transaction to be mined
-      await tx.wait();
-      
-      // Redirect to projects page
+
+      // Wait for confirmation
+      const receipt = await tx.wait();
+      if (!receipt || receipt.status === 0) throw new Error('Transaction failed');
+
+      // Navigate to projects page
       navigate('/projects');
-      
+
     } catch (err: any) {
       console.error('Project creation error:', err);
-      setError(err.message || 'Failed to create project');
+      let errorMessage = 'Failed to create project';
+
+      if (err.reason) errorMessage = err.reason;
+      else if (err.data?.message) errorMessage = err.data.message;
+      else if (err.message) errorMessage = err.message;
+      else if (typeof err === 'string') errorMessage = err;
+
+      setError(errorMessage);
     } finally {
       setIsSubmitting(false);
     }
   };
-  
+
   // Minimum date for deadline (tomorrow)
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   const minDate = tomorrow.toISOString().split('T')[0];
-  
+
   if (!isConnected) {
     return (
       <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-6">
@@ -140,7 +197,53 @@ const CreateProjectForm: React.FC = () => {
       </div>
     );
   }
-  
+
+  if (!roleSelected) {
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold text-gray-900">Select Your Role</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <button
+            onClick={() => handleRoleSelection('guest')}
+            className="p-6 border rounded-lg hover:border-primary-500 transition-colors"
+          >
+            <h3 className="text-xl font-semibold mb-2">Guest User</h3>
+            <p className="text-gray-600">Browse and view projects without creating or funding them</p>
+          </button>
+          <button
+            onClick={() => handleRoleSelection('registered')}
+            className="p-6 border rounded-lg hover:border-primary-500 transition-colors"
+          >
+            <h3 className="text-xl font-semibold mb-2">Registered User</h3>
+            <p className="text-gray-600">Create and fund projects using Sepolia testnet ETH</p>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (userRole === 'guest') {
+    return (
+      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 mb-6">
+        <div className="flex items-start">
+          <AlertCircle className="h-5 w-5 text-yellow-500 mt-0.5 mr-3" />
+          <div>
+            <h3 className="text-lg font-medium text-yellow-800">Guest Access Limited</h3>
+            <p className="mt-2 text-yellow-700">
+              As a guest user, you can only view projects. Only registered users can create projects.
+            </p>
+            <button
+              onClick={() => handleRoleSelection('registered')}
+              className="mt-4 btn btn-primary"
+            >
+              Switch to Registered User
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       {error && (
@@ -151,7 +254,7 @@ const CreateProjectForm: React.FC = () => {
           </div>
         </div>
       )}
-      
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Title */}
         <div className="md:col-span-2">
@@ -170,7 +273,7 @@ const CreateProjectForm: React.FC = () => {
           />
           {errors.title && <p className="mt-1 text-sm text-error-500">{errors.title}</p>}
         </div>
-        
+
         {/* Description */}
         <div className="md:col-span-2">
           <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">
@@ -188,7 +291,7 @@ const CreateProjectForm: React.FC = () => {
           />
           {errors.description && <p className="mt-1 text-sm text-error-500">{errors.description}</p>}
         </div>
-        
+
         {/* Category */}
         <div>
           <label htmlFor="category" className="block text-sm font-medium text-gray-700 mb-1">
@@ -209,7 +312,7 @@ const CreateProjectForm: React.FC = () => {
             ))}
           </select>
         </div>
-        
+
         {/* Location */}
         <div>
           <label htmlFor="location" className="block text-sm font-medium text-gray-700 mb-1">
@@ -225,7 +328,7 @@ const CreateProjectForm: React.FC = () => {
             placeholder="City, State or Region"
           />
         </div>
-        
+
         {/* Funding Goal */}
         <div>
           <label htmlFor="goal" className="block text-sm font-medium text-gray-700 mb-1">
@@ -245,7 +348,7 @@ const CreateProjectForm: React.FC = () => {
           />
           {errors.goal && <p className="mt-1 text-sm text-error-500">{errors.goal}</p>}
         </div>
-        
+
         {/* Deadline */}
         <div>
           <label htmlFor="deadline" className="block text-sm font-medium text-gray-700 mb-1">
@@ -263,7 +366,7 @@ const CreateProjectForm: React.FC = () => {
           />
           {errors.deadline && <p className="mt-1 text-sm text-error-500">{errors.deadline}</p>}
         </div>
-        
+
         {/* Image URL */}
         <div className="md:col-span-2">
           <label htmlFor="image" className="block text-sm font-medium text-gray-700 mb-1">
@@ -283,7 +386,7 @@ const CreateProjectForm: React.FC = () => {
           </p>
         </div>
       </div>
-      
+
       <div className="mt-8 flex justify-end">
         <button
           type="button"

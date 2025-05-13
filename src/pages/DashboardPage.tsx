@@ -1,71 +1,142 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useWeb3 } from '../context/Web3Context';
-import { PlusCircle, Landmark, AlertCircle, ArrowRightLeft, Download, Upload } from 'lucide-react';
+import { PlusCircle, Landmark, AlertCircle, ArrowRightLeft, Download, Upload, Loader } from 'lucide-react';
 import { motion } from 'framer-motion';
 import FundingProgressBar from '../components/shared/FundingProgressBar';
 import TransactionHistory from '../components/project/TransactionHistory';
-import { mockProjects } from '../data/mockProjects';
-import { Project } from '../types/project';
+import { Project, Transaction } from '../types/project';
+import { ethers } from 'ethers';
 
 const DashboardPage: React.FC = () => {
-  const { isConnected, account } = useWeb3();
+  const { isConnected, account, fundingContract } = useWeb3();
   const [myProjects, setMyProjects] = useState<Project[]>([]);
   const [supportedProjects, setSupportedProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('myProjects');
-  
-  // Fetch user projects
+
+  // Fetch user projects from blockchain
   useEffect(() => {
-    if (isConnected) {
-      // Simulate API call with mock data
-      setTimeout(() => {
-        // Filter projects created by user
-        const createdProjects = mockProjects.filter(
-          (project) => project.creator.toLowerCase() === account.toLowerCase()
-        );
-        setMyProjects(createdProjects);
-        
-        // Filter projects supported by user
-        const donatedProjects = mockProjects.filter((project) =>
-          project.transactions?.some(
-            (tx) => tx.type === 'donation' && tx.from.toLowerCase() === account.toLowerCase()
-          )
-        );
-        setSupportedProjects(donatedProjects);
-        
+    const fetchProjects = async () => {
+      if (isConnected && fundingContract && account) {
+        try {
+          // Get project count
+          const projectCount = await fundingContract.getProjectCount();
+
+          // Fetch all projects
+          const allProjects: Project[] = [];
+
+          for (let i = 1; i <= projectCount; i++) {
+            try {
+              const projectData = await fundingContract.projects(i);
+
+              // Convert project data to our Project type
+              const project: Project = {
+                id: projectData.id.toString(),
+                title: projectData.title,
+                description: projectData.description,
+                category: projectData.category,
+                goal: parseFloat(ethers.formatEther(projectData.goal)),
+                currentAmount: parseFloat(ethers.formatEther(projectData.currentAmount)),
+                creator: projectData.creator,
+                deadline: Number(projectData.deadline),
+                createdAt: Number(projectData.createdAt),
+                image: projectData.imageUrl,
+                location: projectData.location,
+                transactions: [] // We'll fetch these separately
+              };
+
+              // Get donation events for this project
+              try {
+                const filter = fundingContract.filters.DonationReceived(i);
+                const events = await fundingContract.queryFilter(filter);
+
+                // Convert events to transactions
+                const transactions: Transaction[] = events.map((event, index) => {
+                  const { donor, amount } = event.args;
+                  return {
+                    id: `tx-${index}`,
+                    type: 'donation',
+                    from: donor,
+                    amount: parseFloat(ethers.formatEther(amount)),
+                    timestamp: Math.floor(Date.now() / 1000), // We don't have the exact timestamp from events
+                    transactionHash: event.transactionHash,
+                  };
+                });
+
+                project.transactions = transactions;
+              } catch (error) {
+                console.error(`Error fetching transactions for project ${i}:`, error);
+              }
+
+              allProjects.push(project);
+            } catch (error) {
+              console.error(`Error fetching project ${i}:`, error);
+            }
+          }
+
+          // Filter projects created by user
+          const createdProjects = allProjects.filter(
+            (project) => project.creator.toLowerCase() === account.toLowerCase()
+          );
+          setMyProjects(createdProjects);
+
+          // Filter projects supported by user
+          const donatedProjects = allProjects.filter((project) =>
+            project.transactions?.some(
+              (tx) => tx.type === 'donation' && tx.from.toLowerCase() === account.toLowerCase()
+            )
+          );
+          setSupportedProjects(donatedProjects);
+        } catch (error) {
+          console.error("Error fetching projects:", error);
+        }
+
         setIsLoading(false);
-      }, 500);
-    } else {
-      setIsLoading(false);
-    }
-  }, [isConnected, account]);
-  
+      } else {
+        setIsLoading(false);
+      }
+    };
+
+    fetchProjects();
+  }, [isConnected, account, fundingContract]);
+
   // Handle withdrawal
   const handleWithdraw = async (projectId: string) => {
-    // In real implementation, this would call the smart contract
-    console.log('Withdrawing funds from project:', projectId);
-    
-    // For demo purposes, we'll just update the UI
-    setMyProjects((prev) => 
-      prev.map((p) => 
-        p.id === projectId 
-          ? { ...p, currentAmount: 0, transactions: [
-              ...(p.transactions || []),
-              {
-                id: `tx-${Date.now()}`,
-                type: 'withdrawal',
-                from: account,
-                amount: p.currentAmount,
-                timestamp: Math.floor(Date.now() / 1000),
-                transactionHash: `0x${Math.random().toString(16).substr(2, 40)}`,
-              }
-            ]}
-          : p
-      )
-    );
+    if (!fundingContract) {
+      console.error("Contract not initialized");
+      return;
+    }
+
+    try {
+      // Call the withdraw function on the smart contract
+      const tx = await fundingContract.withdrawFunds(projectId);
+      await tx.wait();
+
+      // Update the UI after successful withdrawal
+      setMyProjects((prev) =>
+        prev.map((p) =>
+          p.id === projectId
+            ? { ...p, currentAmount: 0, transactions: [
+                ...(p.transactions || []),
+                {
+                  id: `tx-${Date.now()}`,
+                  type: 'withdrawal',
+                  from: account,
+                  amount: p.currentAmount,
+                  timestamp: Math.floor(Date.now() / 1000),
+                  transactionHash: tx.hash,
+                }
+              ]}
+            : p
+        )
+      );
+    } catch (error) {
+      console.error("Error withdrawing funds:", error);
+      alert("Failed to withdraw funds. See console for details.");
+    }
   };
-  
+
   if (!isConnected) {
     return (
       <div className="pt-16 flex items-center justify-center min-h-screen bg-gray-50">
@@ -86,18 +157,18 @@ const DashboardPage: React.FC = () => {
       </div>
     );
   }
-  
+
   if (isLoading) {
     return (
       <div className="pt-16 flex items-center justify-center min-h-screen">
-        <div className="animate-pulse flex flex-col items-center">
-          <div className="h-10 w-40 bg-gray-200 rounded mb-4"></div>
-          <div className="h-6 w-60 bg-gray-200 rounded"></div>
+        <div className="flex flex-col items-center">
+          <Loader className="h-12 w-12 text-primary-600 animate-spin mb-4" />
+          <p className="text-gray-600">Loading your dashboard...</p>
         </div>
       </div>
     );
   }
-  
+
   return (
     <div className="pt-16">
       {/* Header */}
@@ -119,7 +190,7 @@ const DashboardPage: React.FC = () => {
           </motion.div>
         </div>
       </section>
-      
+
       {/* Dashboard Content */}
       <section className="py-12 bg-gray-50">
         <div className="container-pad">
@@ -133,7 +204,7 @@ const DashboardPage: React.FC = () => {
               <p className="text-3xl font-bold">{myProjects.length}</p>
               <p className="text-sm text-gray-500">Projects created</p>
             </div>
-            
+
             <div className="bg-white rounded-xl shadow-sm p-6">
               <div className="flex items-center mb-2">
                 <ArrowRightLeft className="h-5 w-5 text-primary-600 mr-2" />
@@ -142,7 +213,7 @@ const DashboardPage: React.FC = () => {
               <p className="text-3xl font-bold">{supportedProjects.length}</p>
               <p className="text-sm text-gray-500">Projects supported</p>
             </div>
-            
+
             <div className="bg-white rounded-xl shadow-sm p-6">
               <div className="flex items-center mb-2">
                 <Upload className="h-5 w-5 text-primary-600 mr-2" />
@@ -154,7 +225,7 @@ const DashboardPage: React.FC = () => {
               <p className="text-sm text-gray-500">Across all projects</p>
             </div>
           </div>
-          
+
           {/* Tabs */}
           <div className="mb-8">
             <div className="border-b border-gray-200">
@@ -182,7 +253,7 @@ const DashboardPage: React.FC = () => {
               </nav>
             </div>
           </div>
-          
+
           {/* Tab Content */}
           <div>
             {/* My Projects Tab */}
@@ -223,14 +294,14 @@ const DashboardPage: React.FC = () => {
                               </span>
                             </div>
                           </div>
-                          
+
                           <div className="mb-6">
                             <FundingProgressBar
                               currentAmount={project.currentAmount}
                               goal={project.goal}
                             />
                           </div>
-                          
+
                           {project.currentAmount > 0 ? (
                             <div className="flex justify-end">
                               <button
@@ -253,7 +324,7 @@ const DashboardPage: React.FC = () => {
                             </div>
                           )}
                         </div>
-                        
+
                         {project.transactions && project.transactions.length > 0 && (
                           <div className="border-t">
                             <TransactionHistory transactions={project.transactions} />
@@ -265,7 +336,7 @@ const DashboardPage: React.FC = () => {
                 )}
               </div>
             )}
-            
+
             {/* Supported Projects Tab */}
             {activeTab === 'supportedProjects' && (
               <div>
@@ -289,9 +360,9 @@ const DashboardPage: React.FC = () => {
                       const myDonations = project.transactions?.filter(
                         (tx) => tx.type === 'donation' && tx.from.toLowerCase() === account.toLowerCase()
                       ) || [];
-                      
+
                       const totalDonated = myDonations.reduce((sum, tx) => sum + tx.amount, 0);
-                      
+
                       return (
                         <div key={project.id} className="bg-white rounded-xl shadow-sm overflow-hidden">
                           <div className="p-6">
@@ -312,14 +383,14 @@ const DashboardPage: React.FC = () => {
                                 </span>
                               </div>
                             </div>
-                            
+
                             <div className="mb-6">
                               <FundingProgressBar
                                 currentAmount={project.currentAmount}
                                 goal={project.goal}
                               />
                             </div>
-                            
+
                             <div className="flex justify-end">
                               <Link
                                 to={`/projects/${project.id}`}
